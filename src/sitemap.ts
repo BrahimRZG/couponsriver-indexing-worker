@@ -39,6 +39,20 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
+// Exact-origin check: a plain `startsWith(origin)` would accept
+// lookalike hostnames such as `https://couponsriver.com.evil.com/...`
+// because the substring matches. We parse the URL and compare its
+// origin string instead, which is what URL semantics intend.
+function isOnOrigin(url: string, targetOrigin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.origin === targetOrigin;
+}
+
 export interface CrawlSitemapsResult {
   sitemapUrls: string[];
   entries: SitemapEntry[];
@@ -62,7 +76,7 @@ export async function crawlSitemaps(
     if (visited.has(url)) return;
     visited.add(url);
 
-    if (!url.startsWith(targetOrigin)) {
+    if (!isOnOrigin(url, targetOrigin)) {
       logger.warn(`Skipping sitemap outside target origin: ${url}`);
       return;
     }

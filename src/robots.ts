@@ -26,6 +26,15 @@ export async function fetchRobots(
     }
     const text = await res.text();
     return parseRobots(text);
+  } catch (err) {
+    // Transient network failures fetching robots.txt should not abort
+    // the entire run; fall back to discovering sitemaps from
+    // /sitemap-index.xml. We log the error so it's still visible.
+    logger.warn(
+      `Failed to fetch robots.txt at ${url}: ${(err as Error).message}; ` +
+        `continuing with sitemap-index fallback`,
+    );
+    return { sitemaps: [], disallowed: [], raw: "" };
   } finally {
     clearTimeout(timer);
   }
@@ -34,21 +43,49 @@ export async function fetchRobots(
 export function parseRobots(text: string): RobotsInfo {
   const sitemaps: string[] = [];
   const disallowed: string[] = [];
-  let inGlobalUserAgent = false;
+
+  // robots.txt groups multiple consecutive User-agent lines together;
+  // rules apply to every UA declared at the top of the group. We must
+  // remember whether "*" appeared anywhere in the current group, not
+  // just the most recent User-agent line.
+  let currentGroupAgents = new Set<string>();
+  let sawRuleInGroup = false;
+
+  const isGlobalGroup = (): boolean => currentGroupAgents.has("*");
+
+  const startNewGroup = (): void => {
+    currentGroupAgents = new Set<string>();
+    sawRuleInGroup = false;
+  };
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*$/, "").trim();
-    if (line.length === 0) continue;
+    if (line.length === 0) {
+      // Blank line ends the current group.
+      startNewGroup();
+      continue;
+    }
     const idx = line.indexOf(":");
     if (idx < 0) continue;
     const key = line.slice(0, idx).trim().toLowerCase();
     const value = line.slice(idx + 1).trim();
+
     if (key === "sitemap" && value.length > 0) {
       sitemaps.push(value);
-    } else if (key === "user-agent") {
-      inGlobalUserAgent = value === "*";
-    } else if (key === "disallow" && inGlobalUserAgent && value.length > 0) {
-      disallowed.push(value);
+      continue;
+    }
+    if (key === "user-agent") {
+      // A User-agent line that appears AFTER a rule in this group
+      // starts a new group (per RFC 9309).
+      if (sawRuleInGroup) startNewGroup();
+      currentGroupAgents.add(value);
+      continue;
+    }
+    if (key === "disallow" || key === "allow") {
+      sawRuleInGroup = true;
+      if (key === "disallow" && isGlobalGroup() && value.length > 0) {
+        disallowed.push(value);
+      }
     }
   }
   return { sitemaps, disallowed, raw: text };

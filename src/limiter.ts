@@ -14,7 +14,13 @@ export function createLimiter(maxConcurrent: number): <T>(fn: () => Promise<T>) 
   return function run<T>(fn: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const start = (): void => {
-        fn()
+        // Wrap the call in Promise.resolve().then(fn) so synchronous
+        // exceptions thrown from `fn` itself (before it returns a
+        // Promise) still go through the .then/.catch chain. Without
+        // this, a sync throw would never decrement `active` and the
+        // limiter would slowly leak concurrency slots and stall.
+        Promise.resolve()
+          .then(fn)
           .then((v) => {
             active -= 1;
             resolve(v);

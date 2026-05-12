@@ -131,6 +131,13 @@ async function readBodyLimited(res: Response): Promise<string> {
     received += value.byteLength;
     if (received > MAX_BODY_BYTES) {
       out += decoder.decode(value, { stream: true });
+      // Release the underlying HTTP connection — without cancel() the
+      // stream keeps buffering until the response is fully drained.
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore cancel errors; we already have the bytes we need
+      }
       break;
     }
     out += decoder.decode(value, { stream: true });

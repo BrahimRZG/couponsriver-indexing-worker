@@ -14,7 +14,14 @@ function readString(name: string, fallback?: string): string {
 function readInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
-  const n = Number.parseInt(raw, 10);
+  const trimmed = raw.trim();
+  // Reject anything that isn't a pure positive integer. parseInt is too
+  // lenient (it accepts "15ms" as 15, "15foo" as 15, etc.) and silently
+  // dropping trailing garbage hides typos.
+  if (!/^[0-9]+$/.test(trimmed)) {
+    throw new Error(`Invalid integer for ${name}: ${raw}`);
+  }
+  const n = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(n) || n <= 0) {
     throw new Error(`Invalid integer for ${name}: ${raw}`);
   }
@@ -48,7 +55,9 @@ export function loadConfig(): AppConfig {
     : path.resolve(process.cwd(), databasePathRaw);
 
   const dryRun = readBool("DRY_RUN", true);
-  const indexNowKey = process.env.INDEXNOW_KEY ?? "";
+  // Whitespace-only keys would slip past `length === 0` but are useless
+  // (and the IndexNow endpoint would reject them anyway), so trim first.
+  const indexNowKey = (process.env.INDEXNOW_KEY ?? "").trim();
   if (!dryRun && indexNowKey.length === 0) {
     throw new Error(
       "INDEXNOW_KEY is required when DRY_RUN=false. Set DRY_RUN=true or provide a key.",
