@@ -1,0 +1,48 @@
+# wrangler.toml.example
+#
+# Copy this file to wrangler.toml and fill in the values marked <REPLACE>.
+# NEVER commit wrangler.toml with real secrets — INDEXNOW_KEY must be set
+# via `wrangler secret put INDEXNOW_KEY` (see docs/cloudflare-worker.md).
+#
+# Requires Wrangler v3+:  npm install -g wrangler
+
+name = "couponsriver-indexing-worker"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# Cron Trigger — runs once daily at 03:00 UTC
+# ---------------------------------------------------------------------------
+[triggers]
+crons = ["0 3 * * *"]
+
+# ---------------------------------------------------------------------------
+# D1 database binding
+# The binding name DB must match exactly; it is referenced as env.DB in code.
+# ---------------------------------------------------------------------------
+[[d1_databases]]
+binding  = "DB"
+database_name = "couponsriver-indexing-db"
+database_id   = "<REPLACE: output of `wrangler d1 create couponsriver-indexing-db`>"
+
+# Wrangler will look for migration files in this directory.
+migrations_dir = "migrations"
+
+# ---------------------------------------------------------------------------
+# Plain-text environment variables (safe to commit)
+# ---------------------------------------------------------------------------
+[vars]
+TARGET_SITE            = "https://couponsriver.com"
+INDEXNOW_KEY_LOCATION  = "https://couponsriver.com/indexnow-key.txt"
+DRY_RUN                = "true"
+MAX_URLS_PER_RUN       = "25"
+CONCURRENCY            = "2"
+REQUEST_TIMEOUT_MS     = "15000"
+USER_AGENT             = "CouponsRiverIndexingWorker/1.0 (+https://couponsriver.com)"
+
+# ---------------------------------------------------------------------------
+# Secrets (DO NOT set values here — use `wrangler secret put`)
+# ---------------------------------------------------------------------------
+# wrangler secret put INDEXNOW_KEY
+#   → prompts for the key value, stores it encrypted in Cloudflare.

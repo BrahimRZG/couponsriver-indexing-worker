@@ -13,7 +13,9 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
+    "build:worker": "tsc --project tsconfig.worker.json",
     "check": "tsc --noEmit",
+    "check:worker": "tsc --project tsconfig.worker.json --noEmit",
     "run:once": "tsx src/index.ts --once"
   },
   "dependencies": {
@@ -22,9 +24,11 @@
     "fast-xml-parser": "^4.5.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260511.1",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.14.10",
     "tsx": "^4.19.1",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "wrangler": "^4.90.1"
   }
 }

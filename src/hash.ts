@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 // Patterns whose contents change on every response but do NOT reflect a real
 // content change. These are stripped (or substituted with a constant) before
 // hashing so that unchanged pages produce the same SHA-256 across runs.
@@ -44,10 +42,35 @@ export function normalizeHtmlForHash(html: string): string {
   return out.trim();
 }
 
-export function sha256(input: string): string {
-  return createHash("sha256").update(input, "utf8").digest("hex");
+/**
+ * SHA-256 hash using the Web Crypto API (SubtleCrypto).
+ * Works in both Node 20 (globalThis.crypto) and Cloudflare Workers.
+ *
+ * We access crypto via `(globalThis as unknown as { crypto: Crypto }).crypto`
+ * so this compiles cleanly under both the Node (@types/node) and
+ * Cloudflare Workers (@cloudflare/workers-types) TypeScript configs, which
+ * have slightly different globalThis augmentations.
+ */
+export async function sha256(input: string): Promise<string> {
+  const subtle = (
+    globalThis as unknown as {
+      crypto: {
+        subtle: {
+          digest(
+            algorithm: string,
+            data: ArrayBufferView | ArrayBuffer,
+          ): Promise<ArrayBuffer>;
+        };
+      };
+    }
+  ).crypto.subtle;
+  const encoded = new TextEncoder().encode(input);
+  const buffer = await subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-export function hashHtml(html: string): string {
+export async function hashHtml(html: string): Promise<string> {
   return sha256(normalizeHtmlForHash(html));
 }

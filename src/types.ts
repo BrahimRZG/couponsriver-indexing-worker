@@ -8,7 +8,8 @@ export interface AppConfig {
   concurrency: number;
   requestTimeoutMs: number;
   userAgent: string;
-  databasePath: string;
+  /** Only present in CLI/Node mode; undefined in Cloudflare Worker mode. */
+  databasePath?: string;
   dryRun: boolean;
   bingWebmasterApiKey: string;
 }
