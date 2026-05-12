@@ -1,46 +1,39 @@
-import { loadConfig } from "./config";
+/**
+ * Cloudflare Worker indexer logic.
+ *
+ * This module contains the runIndexer() function used by the scheduled and
+ * fetch handlers in src/worker.ts. It mirrors the flow of src/index.ts but:
+ *   - Uses D1IndexingDb (async) instead of IndexingDb (sync/better-sqlite3).
+ *   - Uses loadWorkerConfig() instead of loadConfig().
+ *   - Uses the async hashHtml() (Web Crypto).
+ *   - Never calls process.exit or process.exitCode.
+ */
+
+import { loadWorkerConfig, WorkerEnv } from "./worker-config";
 import { logger } from "./logger";
 import { fetchRobots, isPathAllowed } from "./robots";
 import { crawlSitemaps } from "./sitemap";
 import { fetchPage, extractCanonical } from "./fetchPage";
 import { hashHtml } from "./hash";
-import { IndexingDb } from "./db";
+import { D1IndexingDb } from "./db-d1";
 import { submitToIndexNow } from "./indexnow";
 import { createLimiter } from "./limiter";
 import { AppConfig, RunCounters, SitemapEntry } from "./types";
 
 const SKIP_EXTENSIONS = new Set([
-  ".css",
-  ".js",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".svg",
-  ".ico",
-  ".xml",
-  ".txt",
-  ".json",
-  ".map",
-  ".gif",
-  ".woff",
-  ".woff2",
-  ".ttf",
-  ".otf",
-  ".pdf",
-  ".mp4",
-  ".mp3",
-  ".zip",
+  ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico",
+  ".xml", ".txt", ".json", ".map", ".gif", ".woff", ".woff2",
+  ".ttf", ".otf", ".pdf", ".mp4", ".mp3", ".zip",
 ]);
 
 function getExtension(url: string): string {
   try {
     const u = new URL(url);
-    const path = u.pathname;
-    const dot = path.lastIndexOf(".");
-    const slash = path.lastIndexOf("/");
+    const p = u.pathname;
+    const dot = p.lastIndexOf(".");
+    const slash = p.lastIndexOf("/");
     if (dot <= slash) return "";
-    return path.slice(dot).toLowerCase();
+    return p.slice(dot).toLowerCase();
   } catch {
     return "";
   }
@@ -83,7 +76,7 @@ interface ProcessedUrl {
 async function processUrl(
   entry: SitemapEntry,
   config: AppConfig,
-  db: IndexingDb,
+  db: D1IndexingDb,
 ): Promise<ProcessedUrl> {
   const normalizedUrl = normalizeUrl(entry.loc);
   const lastmod = entry.lastmod ?? null;
@@ -96,7 +89,7 @@ async function processUrl(
   });
 
   if (!result.ok || !result.body) {
-    db.recordFailure({
+    await db.recordFailure({
       url: normalizedUrl,
       nowIso,
       status: result.status,
@@ -111,18 +104,14 @@ async function processUrl(
     try {
       const canonicalUrl = new URL(canonical, normalizedUrl);
       if (canonicalUrl.hostname !== config.targetHost) {
-        db.recordFailure({
+        await db.recordFailure({
           url: normalizedUrl,
           nowIso,
           status: result.status,
           error: `Canonical points to different host: ${canonicalUrl.hostname}`,
           lastmod,
         });
-        return {
-          url: normalizedUrl,
-          outcome: "skipped",
-          reason: "canonical-different-host",
-        };
+        return { url: normalizedUrl, outcome: "skipped", reason: "canonical-different-host" };
       }
     } catch {
       // Ignore invalid canonical href; fall through.
@@ -130,80 +119,37 @@ async function processUrl(
   }
 
   const newHash = await hashHtml(result.body);
-  const existing = db.getByUrl(normalizedUrl);
+  const existing = await db.getByUrl(normalizedUrl);
 
   if (!existing) {
-    db.upsertNew({
-      url: normalizedUrl,
-      nowIso,
-      status: result.status,
-      hash: newHash,
-      lastmod,
-    });
+    await db.upsertNew({ url: normalizedUrl, nowIso, status: result.status, hash: newHash, lastmod });
     return { url: normalizedUrl, outcome: "new" };
   }
 
   if (existing.last_hash !== newHash) {
-    db.upsertChanged({
-      url: normalizedUrl,
-      nowIso,
-      status: result.status,
-      hash: newHash,
-      lastmod,
-    });
+    await db.upsertChanged({ url: normalizedUrl, nowIso, status: result.status, hash: newHash, lastmod });
     return { url: normalizedUrl, outcome: "changed" };
   }
 
-  db.upsertUnchanged({
-    url: normalizedUrl,
-    nowIso,
-    status: result.status,
-    lastmod,
-  });
+  await db.upsertUnchanged({ url: normalizedUrl, nowIso, status: result.status, lastmod });
   return { url: normalizedUrl, outcome: "unchanged" };
 }
 
-function printSummary(
-  config: AppConfig,
-  counters: RunCounters,
-  databasePath: string,
-): void {
-  const lines: string[] = [
-    "",
-    "Indexing run complete",
-    "",
-    `Target: ${config.targetSite}`,
-    `Dry run: ${config.dryRun}`,
-    "",
-    `Sitemaps discovered: ${counters.sitemapsDiscovered}`,
-    `URLs discovered: ${counters.urlsDiscovered}`,
-    `URLs fetched: ${counters.fetched}`,
-    `New URLs: ${counters.newCount}`,
-    `Changed URLs: ${counters.changedCount}`,
-    `Unchanged URLs: ${counters.unchangedCount}`,
-    `Failed URLs: ${counters.failedCount}`,
-    `Eligible for submission: ${counters.eligible}`,
-    `Submitted to IndexNow: ${counters.submitted}`,
-    `Skipped: ${counters.skipped}`,
-    "",
-    `Database: ${databasePath}`,
-    "",
-  ];
-  for (const line of lines) console.log(line);
-}
+export async function runIndexer(env: WorkerEnv): Promise<void> {
+  // Set logger env snapshot so secrets get redacted in logs.
+  logger.setEnv({ INDEXNOW_KEY: env.INDEXNOW_KEY ?? "" });
 
-async function runOnce(): Promise<number> {
-  const config = loadConfig();
-  logger.info("Starting indexing run", {
+  const config = loadWorkerConfig(env);
+  logger.info("Starting Worker indexing run", {
     targetSite: config.targetSite,
     dryRun: config.dryRun,
     maxUrlsPerRun: config.maxUrlsPerRun,
     concurrency: config.concurrency,
   });
 
-  const db = new IndexingDb(config.databasePath!);
+  const db = new D1IndexingDb(env.DB);
   const startedAt = new Date().toISOString();
-  const runId = db.insertRun({
+  const runId = await db.insertRun({
     startedAt,
     targetSite: config.targetSite,
     dryRun: config.dryRun,
@@ -276,9 +222,7 @@ async function runOnce(): Promise<number> {
     const submitCandidates: string[] = [];
 
     const results = await Promise.all(
-      toProcess.map((entry) =>
-        limit(async () => processUrl(entry, config, db)),
-      ),
+      toProcess.map((entry) => limit(async () => processUrl(entry, config, db))),
     );
 
     for (const res of results) {
@@ -311,7 +255,7 @@ async function runOnce(): Promise<number> {
       const submitResult = await submitToIndexNow(submitCandidates, config);
       counters.submitted = submitResult.submitted;
       if (!config.dryRun && submitResult.submittedUrls.length > 0) {
-        db.markSubmitted({
+        await db.markSubmitted({
           urls: submitResult.submittedUrls,
           nowIso: new Date().toISOString(),
         });
@@ -321,7 +265,7 @@ async function runOnce(): Promise<number> {
       }
     }
 
-    db.finalizeRun(runId, {
+    await db.finalizeRun(runId, {
       finishedAt: new Date().toISOString(),
       discoveredCount: counters.urlsDiscovered,
       fetchedCount: counters.fetched,
@@ -332,11 +276,10 @@ async function runOnce(): Promise<number> {
       failedCount: counters.failedCount,
     });
 
-    printSummary(config, counters, config.databasePath!);
-    return 0;
+    logger.info("Worker indexing run complete", counters);
   } catch (err) {
-    logger.error(`Run failed: ${(err as Error).message}`);
-    db.finalizeRun(runId, {
+    logger.error(`Worker run failed: ${(err as Error).message}`);
+    await db.finalizeRun(runId, {
       finishedAt: new Date().toISOString(),
       discoveredCount: counters.urlsDiscovered,
       fetchedCount: counters.fetched,
@@ -346,13 +289,6 @@ async function runOnce(): Promise<number> {
       submittedCount: counters.submitted,
       failedCount: counters.failedCount,
     });
-    return 1;
-  } finally {
-    db.close();
+    throw err;
   }
 }
-
-void (async () => {
-  const code = await runOnce();
-  process.exitCode = code;
-})();

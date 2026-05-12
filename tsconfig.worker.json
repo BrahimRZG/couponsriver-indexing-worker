@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "outDir": "dist-worker",
+    "noEmit": false
+  },
+  "include": [
+    "src/worker.ts",
+    "src/worker-config.ts",
+    "src/worker-indexer.ts",
+    "src/db-d1.ts",
+    "src/hash.ts",
+    "src/logger.ts",
+    "src/limiter.ts",
+    "src/sitemap.ts",
+    "src/fetchPage.ts",
+    "src/indexnow.ts",
+    "src/robots.ts",
+    "src/types.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-worker", "src/index.ts", "src/db.ts", "src/config.ts"]
+}
