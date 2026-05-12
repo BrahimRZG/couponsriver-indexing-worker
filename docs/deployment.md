@@ -57,7 +57,7 @@ fly machine run --schedule hourly 'node dist/index.js'
 | Cloudflare Pages | No long-lived disk; serverless cold starts; no SQLite persistence. |
 | Netlify static hosting | Same — no backend persistence. |
 | Vercel serverless functions | Ephemeral filesystem; SQLite state is lost between invocations. |
-| GitHub Actions (without state) | Each run starts on a fresh runner; without uploading/downloading the SQLite file as an artifact, all URLs look "new" every run. See `docs/indexnow-setup.md` for the optional artifact-based pattern. |
+| GitHub Actions (without state) | Each run starts on a fresh runner; without persisting the SQLite file between runs, all URLs look "new" every run. See `.github/workflows/indexing-worker.yml.example` for the optional `actions/cache`-based pattern. |
 
 ## Choosing a schedule
 
