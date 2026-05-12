@@ -1,0 +1,67 @@
+# EXAMPLE workflow — NOT active by default.
+#
+# To enable: rename this file to `.github/workflows/indexing-worker.yml`.
+# Note: GitHub Actions runners are ephemeral. Without persisting the SQLite
+# database between runs (e.g. via actions/cache or an artifact upload/download),
+# every run will treat every URL as "new" and re-submit to IndexNow. That is
+# wasteful and possibly considered spammy. Prefer a VPS or a platform with a
+# persistent disk for this worker. See docs/deployment.md.
+
+name: Indexing worker
+
+on:
+  schedule:
+    # Hourly. Adjust to your needs.
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  run-once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_SITE: https://couponsriver.com
+      INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+      INDEXNOW_KEY_LOCATION: https://couponsriver.com/indexnow-key.txt
+      MAX_URLS_PER_RUN: "500"
+      CONCURRENCY: "5"
+      REQUEST_TIMEOUT_MS: "15000"
+      USER_AGENT: "CouponsRiverIndexingWorker/1.0 (+https://couponsriver.com)"
+      DATABASE_PATH: ./data/indexing.sqlite
+      DRY_RUN: "true"   # Flip to "false" only after dry-run looks correct.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # OPTIONAL: restore SQLite state from cache to avoid re-submitting everything.
+      # Note: actions/cache is best-effort and may evict; for true persistence,
+      # use a self-hosted runner with a persistent volume.
+      - name: Restore indexing state
+        uses: actions/cache@v4
+        with:
+          path: data/indexing.sqlite
+          key: indexing-state-${{ github.repository }}
+
+      - name: Run worker
+        run: node dist/index.js
+
+      - name: Persist indexing state
+        if: always()
+        uses: actions/cache@v4
+        with:
+          path: data/indexing.sqlite
+          key: indexing-state-${{ github.repository }}
