@@ -16,6 +16,10 @@ export interface SubmitResult {
   submitted: number;
   batches: number;
   errors: string[];
+  // URLs that belong to successfully-submitted batches, in submission order.
+  // Use this (not a slice of the input list) when updating local state, so
+  // failed intermediate batches don't cause the wrong URLs to be marked.
+  submittedUrls: string[];
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -44,6 +48,7 @@ export async function submitToIndexNow(
     submitted: 0,
     batches: 0,
     errors: [],
+    submittedUrls: [],
   };
 
   if (filtered.length === 0) return result;
@@ -93,6 +98,7 @@ export async function submitToIndexNow(
         });
         if (res.ok || res.status === 202) {
           result.submitted += batch.length;
+          for (const u of batch) result.submittedUrls.push(u);
           success = true;
           break;
         }

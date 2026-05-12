@@ -310,9 +310,9 @@ async function runOnce(): Promise<number> {
     if (submitCandidates.length > 0) {
       const submitResult = await submitToIndexNow(submitCandidates, config);
       counters.submitted = submitResult.submitted;
-      if (!config.dryRun && submitResult.submitted > 0) {
+      if (!config.dryRun && submitResult.submittedUrls.length > 0) {
         db.markSubmitted({
-          urls: submitCandidates.slice(0, submitResult.submitted),
+          urls: submitResult.submittedUrls,
           nowIso: new Date().toISOString(),
         });
       }

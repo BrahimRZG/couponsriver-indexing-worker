@@ -139,9 +139,26 @@ async function readBodyLimited(res: Response): Promise<string> {
   return out;
 }
 
-const CANONICAL_RE = /<link\s+[^>]*rel=["']?canonical["']?[^>]*href=["']([^"']+)["'][^>]*>/i;
+// <link> attribute order isn't fixed in HTML, so we look at every <link> tag
+// in <head>, then pick the first one whose rel attribute equals "canonical"
+// (case-insensitive, possibly inside a space-separated list).
+const LINK_TAG_RE = /<link\b[^>]*>/gi;
+const HREF_ATTR_RE = /\bhref\s*=\s*(["'])([^"']+)\1/i;
+const REL_ATTR_RE = /\brel\s*=\s*(["']?)([^"'>\s]+(?:\s+[^"'>\s]+)*)\1/i;
 
 export function extractCanonical(html: string): string | undefined {
-  const match = CANONICAL_RE.exec(html);
-  return match?.[1]?.trim();
+  let match: RegExpExecArray | null;
+  LINK_TAG_RE.lastIndex = 0;
+  while ((match = LINK_TAG_RE.exec(html)) !== null) {
+    const tag = match[0];
+    const relMatch = REL_ATTR_RE.exec(tag);
+    if (!relMatch) continue;
+    const relValue = relMatch[2] ?? "";
+    const rels = relValue.toLowerCase().split(/\s+/);
+    if (!rels.includes("canonical")) continue;
+    const hrefMatch = HREF_ATTR_RE.exec(tag);
+    const href = hrefMatch?.[2]?.trim();
+    if (href && href.length > 0) return href;
+  }
+  return undefined;
 }
